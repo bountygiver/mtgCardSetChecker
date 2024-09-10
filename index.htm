@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>Scryfall set browser</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta charset="utf-8">
+        <script src="https://code.jquery.com/jquery-3.7.1.min.js" integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+        <script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.9/angular.min.js"></script>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+        <style>
+            thead > tr > td {
+                -webkit-user-select: none;   
+                -moz-user-select: none;
+                -ms-user-select: none;
+                user-select: none;
+                cursor: pointer;
+            }
+        </style>
+    </head>
+    <body class="p-3">
+        <div ng-app="cardChecker" ng-controller="mainController">
+            <div id="dataSelect" class="container" ng-hide="cardLoaded || cardLoading">
+                <div class="row my-lg-5">
+                    <form class="col col-lg-6 text-center align-items-center">
+                        <h1>Use a Scryfall batched card json acquired from: <a href="https://scryfall.com/docs/api/bulk-data" target="_blank">the default cards entry</a></h1>
+                        <input type="file" ng-blur="cardDataUpdated($event)" />
+                    </form>
+                    <div class="col col-lg-6 text-center align-items-center">
+                        <button type="button" class="btn btn-link fs-1" ng-click="useOnline()">Use online (slower, can only process up to 10 cards per seconds)</button>
+                    </div>
+                </div>
+            </div>
+            <div ng-show="cardLoading">
+                Loading cards...
+            </div>
+            <div ng-show="cardLoaded">
+                <div class="container-fluid">
+                    <div class="row">
+                        <div class="col-12 col-lg-6">
+                            <textarea id="cards" ng-model="cardsInput" ng-list="&#10;" ng-trim="false" class="form-control" style="width: 100%; height: 600px;"></textarea>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                            <div id="setsChk" class="overflow-y-scroll p-1" style="height: 600px;">
+                                <div class="form-check" ng-repeat="x in currentSets | orderBy: 'name'">
+                                    <input id="setcheck{{::$id}}_1" class="form-check-input set-checkbox" type="checkbox" ng-model="activeSets[x.set]" />
+                                    <label for="setcheck{{::$id}}_1" class="form-check-label">{{x.name}}</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <br />
+                <button ng-click="checkCards()" ng-disabled="loading.active" class="btn btn-primary" type="button">Check</button>
+                <div class="progress my-1" id="loadProgress" role="progressbar" ng-show="loading.active" aria-label="Loading Cards" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar" style="width: {{loading.curr * 100 /loading.max}}%">{{loading.curr}}/{{loading.max}}</div>
+                </div>
+                <div ng-show="errors.length">
+                    <h1 class="text-danger">Some errors have been found:</h1>
+                    <ul>
+                        <li ng-repeat="x in errors" class="text-danger">{{x}}</li>
+                    </ul>
+                </div>
+                <table class="table m-3">
+                    <thead>
+                        <tr>
+                            <td class="fw-bold" ng-click="sort('name')">Name <i ng-show="sortkey === 'name'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
+                            <td class="fw-bold" ng-click="sort('setcol')">Set + Collection Number <i ng-show="sortkey === 'setcol'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
+                            <td class="fw-bold" ng-click="sort('rarity_val')">Rarity <i ng-show="sortkey === 'rarity_val'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
+                            <td class="fw-bold" ng-click="sort('lowest_price')">Price <i ng-show="sortkey === 'lowest_price'" class="bi" ng-class="sortdesc ? 'bi-sort-up-alt' : 'bi-sort-down-alt'"></i></td>
+                        </tr>
+                    </thead>
+                    <tbody id="results">
+                        <tr ng-repeat="x in currentCards | orderBy:sortkey:sortdesc" ng-if="activeSets[x.set]">
+                            <td><a href="{{x.scryfall_uri}}" target="_blank" tooltip>{{x.name}}</a></td>
+                            <td>{{x.setcol}}</td>
+                            <td>{{x.rarity}}</td>
+                            <td><span class="px-1" ng-show="x.lowest_price">[{{x.lowest_price|number:2}}]</span><span class="px-1" ng-repeat="(y,z) in x.prices" ng-if="y != 'tix' && z">{{y}}: {{z}}</span></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </body>
+    <script>
+        const app = angular.module('cardChecker', []);
+        const basics = ["plains", "island", "swamp", "mountain", "forest"];
+        const rarity_val = {common: 0, uncommon: 1, rare: 2, mythic: 3, special: 4};
+        app.directive('tooltip', function(){
+            return {
+                restrict: 'A',
+                link: function(scope, element, attrs){
+                    new bootstrap.Tooltip(element, {
+                        html: true,
+                        title: (scope.x.image_uris && scope.x.image_uris.small ? 
+                        `<img loading="lazy" src="${scope.x.image_uris.small}">` : 
+                        `<span>${scope.x.card_faces.map(f => `<img loading="lazy" src="${f.image_uris.small}">`).join("")}</span>`)
+                    });
+                }
+            };
+        });
+        app.controller('mainController', ['$scope', '$timeout', '$http', function($scope, $timeout, $http) {
+            $scope.cardLoaded = false;
+            $scope.cardLoading = false;
+            $scope.selectAll = false;
+            $scope.currentCards = [];
+            $scope.currentSets = [];
+            $scope.activeSets = {};
+            $scope.cardsInput = [];
+            $scope.errors = [];
+            $scope.sortdesc = false;
+            $scope.sortkey = "name";
+            $scope.loading = {
+                active: false,
+                max: 0,
+                curr: 0
+            };
+            $scope.data = null;
+            $scope.compressedData = null;
+            const doneLoading = function(data) {
+                try {
+                    const j = JSON.parse(data)
+
+                    if (j.cards && j.sets) {
+                        $scope.compressedData = j;
+                    } else {
+                        $scope.data = j.filter(d => !d.digital);
+                    }
+                    $scope.cardLoaded = true;
+                } catch {
+                    $scope.cardLoaded = false;
+                } finally {
+                    $scope.cardLoading = false;
+                    $scope.loading.active = false;
+                    $scope.$digest();
+                }
+            }
+            $scope.cardDataUpdated = function (e) {
+                if (!$scope.cardLoading && e.target.files && e.target.files.length > 0) {
+                    $scope.cardLoading = true;
+                    $scope.loading.active = true;
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        doneLoading(e.target.result);
+                    };
+                    reader.readAsText(e.target.files[0]);
+                }
+            };
+            $scope.useOnline = function() {
+                $scope.compressedData = null;
+                $scope.data = null;
+                $scope.cardLoading = false;
+                $scope.loading.active = false;
+                $scope.cardLoaded = true;
+            };
+            const getLowestPrice = function(card) {
+                return Object.keys(card.prices).reduce(function (min, next) {
+                    if (next !== "tix") {
+                        const priceNum = parseFloat(card.prices[next]);
+                        if (priceNum && (!min || priceNum < min)) {
+                            return priceNum;
+                        }
+                    }
+                    return min;
+                }, null);
+            }
+            $scope.sort = function (sortKey) {
+                if ($scope.sortkey === sortKey) {
+                    $scope.sortdesc = !$scope.sortdesc;
+                } else {
+                    $scope.sortkey = sortKey;
+                    $scope.sortdesc = false;
+                }
+            }
+            $scope.checkCards = function () {
+                if ($scope.loading.active) {
+                    return;
+                }
+                $scope.loading.active = true;
+                $scope.loading.curr = 0;
+                let cards = $scope.cardsInput.map(c => /^[\d]*\s?\b([^\[\]]*\b)/i.exec(c)).filter(f => f && f.length > 1 && f[1] && !basics.includes(f[1].toLowerCase())).map(f => f[1].trim().replace(" / ", " // "));
+                $scope.loading.max = cards.length;
+                if (cards.length == 0) {
+                    $scope.loading.active = false;
+                    $scope.errors = ["No cards entered!"];
+                    return;
+                }
+                let cardResults = [];
+                $scope.errors = [];
+                const resolve_results = function() {
+                    $scope.loading.curr = $scope.loading.curr + 1;
+                    if ($scope.loading.curr == $scope.loading.max) {
+                        $scope.currentCards = cardResults.filter(c => c && c.length).flat();
+
+                        let addedSet = {};
+                        $scope.currentCards.forEach((c) => {
+                            c.lowest_price = getLowestPrice(c);
+                            c.setcol = `${c.set.toUpperCase()} ${c.collector_number}`;
+                            c.rarity_val = rarity_val[c.rarity]
+                            if (addedSet[c.set]) {
+                                addedSet[c.set].count++;
+                            } else {
+                                addedSet[c.set] = { count: 1, name: c.set_name };
+                            }
+                        });
+                        $scope.currentSets = Object.keys(addedSet).map(k => { 
+                            return {
+                                set: k, 
+                                name: `${addedSet[k].name} [${k.toUpperCase()}] (${addedSet[k].count})`
+                            }
+                        });
+                        $scope.loading.active = false;
+                    }
+                }
+                for(let i = 0; i < cards.length; ++i) {
+                    let cardName = cards[i].toLowerCase();
+                    $timeout(function() {
+                        if ($scope.data) {
+                            const matches = $scope.data.filter(f => f.name.toLowerCase() === cardName);
+                            if (matches && matches.length) {
+                                cardResults.push(matches.filter(c => !c.type_line.includes("Basic Land")));
+                            } else {
+                                const fuzzymatches = $scope.data.filter(f => f.name.toLowerCase().includes(cardName) && !f.type_line.includes("Basic Land"));
+                                if (fuzzymatches.length) {
+                                    cardResults.push(fuzzymatches);
+                                } else {
+                                    $scope.errors.push(`${cards[i]} cannot be found. Check spelling!`);
+                                }
+                            }
+                        } else if ($scope.compressedData) {
+                            const pushResult = [];
+                            if (cardName in $scope.compressedData.cards) {
+                                pushResult.push($scope.compressedData.cards[cards[i].toLowerCase()]);
+                            } else {
+                                const suggestions = Object.keys($scope.compressedData.cards).filter(n => n.startsWith(cards[i].toLowerCase() + " //"));
+                                if (suggestions.length == 1) {
+                                    pushResult.push($scope.compressedData.cards[suggestions[0]]);
+                                } else {
+                                    const suggestions = Object.keys($scope.compressedData.cards).filter(n => n.includes(cards[i].toLowerCase()));
+                                    let err = `${cards[i]} cannot be found. Check spelling!`;
+                                    if (suggestions.length) {
+                                        err += " Try: " + suggestions.join(", ");
+                                    }
+                                    $scope.errors.push(err);
+                                }
+                            }
+                            pushResult.forEach(r => {
+                                cardResults.push(r.cards.map(c => {
+                                    return {
+                                        name: cards[i],
+                                        set: c.set,
+                                        collector_number: c.collector_number,
+                                        set_name: $scope.compressedData.sets[c.set],
+                                        rarity: c.rarity,
+                                        type_line: r.type_line,
+                                        prices: c.prices,
+                                        card_faces: c.imgs.map(i => {return {image_uris: {small: i}}}),
+                                        scryfall_uri: `https://scryfall.com/card/${c.set}/${c.collector_number}`
+                                    };
+                                }));
+                            });
+                        } else {
+                            $http.get(`https://api.scryfall.com/cards/search?unique=prints&q=${encodeURIComponent(`!"${cardName}" game:paper`)}`)
+                            .then(function (response) {
+                                if (response.data && response.data.data && response.data.data.length) {
+                                    cardResults.push(response.data.data);
+                                } else {
+                                    $scope.errors.push(`${cards[i]} not found.`);
+                                }
+                            })
+                            .catch(function (reason) {
+                                $scope.errors.push(`Error fetching for ${cards[i]}. ${reason.status == 404 ? "Card not found." : ""}`);
+                            })
+                            .finally(resolve_results);
+                            return;
+                        }
+                        resolve_results();
+                    }, $scope.data == null && $scope.compressedData == null ? i * 105 : 0);
+                }
+            }
+        }]);
+        </script>
+</html>
