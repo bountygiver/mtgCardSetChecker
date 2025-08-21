@@ -66,21 +66,28 @@
                         <li ng-repeat="x in errors" class="text-danger">{{x}}</li>
                     </ul>
                 </div>
+                <div>Price Logic</div>
+                <select ng-model="priceMode">
+                    <option value="cheapest">Cheapest</option>
+                    <option value="usd">USD</option>
+                    <option value="eur">EUR</option>
+                    <option value="tix">Tix</option>
+                </select>
                 <table class="table m-3">
                     <thead>
                         <tr>
-                            <td class="fw-bold" ng-click="sort('name')">Name <i ng-show="sortkey === 'name'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
-                            <td class="fw-bold" ng-click="sort('setcol')">Set + Collection Number <i ng-show="sortkey === 'setcol'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
-                            <td class="fw-bold" ng-click="sort('rarity_val')">Rarity <i ng-show="sortkey === 'rarity_val'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
-                            <td class="fw-bold" ng-click="sort('lowest_price')">Price <i ng-show="sortkey === 'lowest_price'" class="bi" ng-class="sortdesc ? 'bi-sort-up-alt' : 'bi-sort-down-alt'"></i></td>
+                            <td class="fw-bold" ng-click="setsort('name')">Name <i ng-show="sortkey === 'name'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
+                            <td class="fw-bold" ng-click="setsort('setcol')">Set + Collection Number <i ng-show="sortkey === 'setcol'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
+                            <td class="fw-bold" ng-click="setsort('rarity_val')">Rarity <i ng-show="sortkey === 'rarity_val'" class="bi" ng-class="sortdesc ? 'bi-sort-alpha-up' : 'bi-sort-alpha-down'"></i></td>
+                            <td class="fw-bold" ng-click="setsort('lowest_price')">Price <i ng-show="sortkey === 'lowest_price'" class="bi" ng-class="sortdesc ? 'bi-sort-up-alt' : 'bi-sort-down-alt'"></i></td>
                         </tr>
                     </thead>
                     <tbody id="results">
-                        <tr ng-repeat="x in currentCards | orderBy:sortkey:sortdesc" ng-if="activeSets[x.set]">
+                        <tr ng-repeat="x in sort(currentCards)" ng-if="activeSets[x.set]">
                             <td><a href="{{x.scryfall_uri}}" target="_blank" tooltip>{{x.name}}</a></td>
                             <td>{{x.setcol}}</td>
                             <td>{{x.rarity}}</td>
-                            <td><span class="px-1" ng-show="x.lowest_price">[{{x.lowest_price|number:2}}]</span><span class="px-1" ng-repeat="(y,z) in x.prices" ng-if="y != 'tix' && z">{{y}}: {{z}}</span></td>
+                            <td><span>{{display_price(x)}}</span><span class="px-1" ng-repeat="(y,z) in x.prices" ng-if="z">{{y}}: {{z}}</span></td>
                         </tr>
                     </tbody>
                 </table>
@@ -119,6 +126,7 @@
             $scope.errors = [];
             $scope.sortdesc = false;
             $scope.sortkey = "name";
+            $scope.priceMode = "usd";
             $scope.loading = {
                 active: false,
                 max: 0,
@@ -173,7 +181,7 @@
                     return min;
                 }, null);
             }
-            $scope.sort = function (sortKey) {
+            $scope.setsort = function (sortKey) {
                 if ($scope.sortkey === sortKey) {
                     $scope.sortdesc = !$scope.sortdesc;
                 } else {
@@ -181,6 +189,49 @@
                     $scope.sortdesc = false;
                 }
             }
+            $scope.cheapest_price = function(card) {
+                if (!card.prices) {
+                    return null;
+                }
+                if ($scope.priceMode == "cheapest") {
+                    return getLowestPrice(card);
+                }
+
+                return Object.keys(card.prices).filter((k) => k.toLowerCase().startsWith($scope.priceMode.toLowerCase())).reduce((min, next) => {
+                    const priceNum = parseFloat(card.prices[next]);
+                    if (priceNum && (!min || priceNum < min)) {
+                        return priceNum;
+                    }
+                    return min;
+                }, null);
+            };
+            const nullableCompare = function(x, y) {
+                if (x == null) {
+                    return y != null && 1 || 0;
+                }
+                if (y == null) {
+                    return -1;
+                }
+
+                if (x.localeCompare) {
+                    return x.localeCompare(y);
+                }
+
+                return x - y;
+            };
+            $scope.sort = function (list) {
+                if ($scope.sortkey === "lowest_price") {
+                    return list.toSorted((x, y) => nullableCompare($scope.cheapest_price(x), $scope.cheapest_price(y)) * ($scope.sortdesc && -1 || 1));
+                }
+
+                return list.toSorted((x, y) => nullableCompare(x[$scope.sortkey], y[$scope.sortkey]) * ($scope.sortdesc && -1 || 1));
+            }
+            $scope.display_price = function(card) {
+                const cheapest = $scope.cheapest_price(card);
+                if (cheapest) {
+                    return `[${cheapest.toFixed(2)}] `;
+                }
+            };
             $scope.checkCards = function () {
                 if ($scope.loading.active) {
                     return;
@@ -203,7 +254,6 @@
 
                         let addedSet = {};
                         $scope.currentCards.forEach((c) => {
-                            c.lowest_price = getLowestPrice(c);
                             c.setcol = `${c.set.toUpperCase()} ${c.collector_number}`;
                             c.rarity_val = rarity_val[c.rarity]
                             if (addedSet[c.set]) {
