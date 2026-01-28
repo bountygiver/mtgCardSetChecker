@@ -232,6 +232,7 @@
                     return `[${cheapest.toFixed(2)}] `;
                 }
             };
+            $scope.queue = [];
             $scope.checkCards = function () {
                 if ($scope.loading.active) {
                     return;
@@ -271,70 +272,82 @@
                         $scope.loading.active = false;
                     }
                 }
+                $scope.queue = [];
                 for(let i = 0; i < cards.length; ++i) {
                     let cardName = cards[i].toLowerCase();
-                    $timeout(function() {
-                        if ($scope.data) {
-                            const matches = $scope.data.filter(f => f.name.toLowerCase() === cardName);
-                            if (matches && matches.length) {
-                                cardResults.push(matches.filter(c => !c.type_line.includes("Basic Land")));
-                            } else {
-                                const fuzzymatches = $scope.data.filter(f => f.name.toLowerCase().includes(cardName) && !f.type_line.includes("Basic Land"));
-                                if (fuzzymatches.length) {
-                                    cardResults.push(fuzzymatches);
-                                } else {
-                                    $scope.errors.push(`${cards[i]} cannot be found. Check spelling!`);
-                                }
-                            }
-                        } else if ($scope.compressedData) {
-                            const pushResult = [];
-                            if (cardName in $scope.compressedData.cards) {
-                                pushResult.push($scope.compressedData.cards[cards[i].toLowerCase()]);
-                            } else {
-                                const suggestions = Object.keys($scope.compressedData.cards).filter(n => n.startsWith(cards[i].toLowerCase() + " //"));
-                                if (suggestions.length == 1) {
-                                    pushResult.push($scope.compressedData.cards[suggestions[0]]);
-                                } else {
-                                    const suggestions = Object.keys($scope.compressedData.cards).filter(n => n.includes(cards[i].toLowerCase()));
-                                    let err = `${cards[i]} cannot be found. Check spelling!`;
-                                    if (suggestions.length) {
-                                        err += " Try: " + suggestions.join(", ");
-                                    }
-                                    $scope.errors.push(err);
-                                }
-                            }
-                            pushResult.forEach(r => {
-                                cardResults.push(r.cards.map(c => {
-                                    return {
-                                        name: cards[i],
-                                        set: c.set,
-                                        collector_number: c.collector_number,
-                                        set_name: $scope.compressedData.sets[c.set],
-                                        rarity: c.rarity,
-                                        type_line: r.type_line,
-                                        prices: c.prices,
-                                        card_faces: c.imgs.map(i => {return {image_uris: {small: i}}}),
-                                        scryfall_uri: `https://scryfall.com/card/${c.set}/${c.collector_number}`
-                                    };
-                                }));
-                            });
+                    if ($scope.data) {
+                        const matches = $scope.data.filter(f => f.name.toLowerCase() === cardName);
+                        if (matches && matches.length) {
+                            cardResults.push(matches.filter(c => !c.type_line.includes("Basic Land")));
                         } else {
-                            $http.get(`https://api.scryfall.com/cards/search?unique=prints&q=${encodeURIComponent(`!"${cardName}" game:paper`)}`)
-                            .then(function (response) {
-                                if (response.data && response.data.data && response.data.data.length) {
-                                    cardResults.push(response.data.data);
-                                } else {
-                                    $scope.errors.push(`${cards[i]} not found.`);
-                                }
-                            })
-                            .catch(function (reason) {
-                                $scope.errors.push(`Error fetching for ${cards[i]}. ${reason.status == 404 ? "Card not found." : ""}`);
-                            })
-                            .finally(resolve_results);
-                            return;
+                            const fuzzymatches = $scope.data.filter(f => f.name.toLowerCase().includes(cardName) && !f.type_line.includes("Basic Land"));
+                            if (fuzzymatches.length) {
+                                cardResults.push(fuzzymatches);
+                            } else {
+                                $scope.errors.push(`${cards[i]} cannot be found. Check spelling!`);
+                            }
                         }
-                        resolve_results();
-                    }, $scope.data == null && $scope.compressedData == null ? i * 105 : 0);
+                    } else if ($scope.compressedData) {
+                        const pushResult = [];
+                        if (cardName in $scope.compressedData.cards) {
+                            pushResult.push($scope.compressedData.cards[cards[i].toLowerCase()]);
+                        } else {
+                            const suggestions = Object.keys($scope.compressedData.cards).filter(n => n.startsWith(cards[i].toLowerCase() + " //"));
+                            if (suggestions.length == 1) {
+                                pushResult.push($scope.compressedData.cards[suggestions[0]]);
+                            } else {
+                                const suggestions = Object.keys($scope.compressedData.cards).filter(n => n.includes(cards[i].toLowerCase()));
+                                let err = `${cards[i]} cannot be found. Check spelling!`;
+                                if (suggestions.length) {
+                                    err += " Try: " + suggestions.join(", ");
+                                }
+                                $scope.errors.push(err);
+                            }
+                        }
+                        pushResult.forEach(r => {
+                            cardResults.push(r.cards.map(c => {
+                                return {
+                                    name: cards[i],
+                                    set: c.set,
+                                    collector_number: c.collector_number,
+                                    set_name: $scope.compressedData.sets[c.set],
+                                    rarity: c.rarity,
+                                    type_line: r.type_line,
+                                    prices: c.prices,
+                                    card_faces: c.imgs.map(i => {return {image_uris: {small: i}}}),
+                                    scryfall_uri: `https://scryfall.com/card/${c.set}/${c.collector_number}`
+                                };
+                            }));
+                        });
+                    } else {
+                        $scope.queue.push(cardName);
+                        continue;
+                    }
+                    resolve_results();
+                }
+                const queryOnline = function() {
+                    const cardName = $scope.queue.pop();
+                    if (cardName)
+                    {
+                        $http.get(`https://api.scryfall.com/cards/search?unique=prints&q=${encodeURIComponent(`!"${cardName}" game:paper`)}`)
+                        .then(function (response) {
+                            if (response.data && response.data.data && response.data.data.length) {
+                                cardResults.push(response.data.data);
+                            } else {
+                                $scope.errors.push(`${cards[i]} not found.`);
+                            }
+                        })
+                        .catch(function (reason) {
+                            $scope.errors.push(`Error fetching for ${cards[i]}. ${reason.status == 404 ? "Card not found." : ""}`);
+                        })
+                        .finally(() => {
+                            resolve_results();
+                            $timeout(queryOnline, 1000);
+                        });
+                    }
+                }
+                for (let i = 0; i < Math.min(10, $scope.queue.length); ++i) {
+                    $timeout(queryOnline, i * 100);
                 }
             }
         }]);
