@@ -239,6 +239,7 @@
                 }
                 $scope.loading.active = true;
                 $scope.loading.curr = 0;
+                $scope.timeout = 0;
                 let cards = $scope.cardsInput.map(c => /^[\d]*\s?\b([^\[\]]*\b)/i.exec(c)).filter(f => f && f.length > 1 && f[1] && !basics.includes(f[1].toLowerCase())).map(f => f[1].trim().replace(" / ", " // "));
                 $scope.loading.max = cards.length;
                 if (cards.length == 0) {
@@ -336,14 +337,26 @@
                             } else {
                                 $scope.errors.push(`${cards[i]} not found.`);
                             }
-                        })
-                        .catch(function (reason) {
-                            $scope.errors.push(`Error fetching for ${cards[i]}. ${reason.status == 404 ? "Card not found." : ""}`);
-                        })
-                        .finally(() => {
                             resolve_results();
                             $timeout(queryOnline, 1100);
-                        });
+                        })
+                        .catch(function (reason) {
+                            if (reason.status == 404) {
+                                $scope.errors.push(`Error fetching for ${cards[i]}. Card not found.`);
+                                resolve_results();
+                                $timeout(queryOnline, 1100);
+                            } else if (reason.status == 429) {
+                                $scope.timeout = $scope.timeout + 2500;
+                                if ($scope.timeout < 10000) {
+                                    $scope.queue.push(cardName);
+                                    $timeout(queryOnline, 1000 + $scope.timeout);
+                                }
+                            } else {
+                                $scope.errors.push(`Error fetching for ${cards[i]}. Server cannot be reached ${reason.status}.`);
+                                resolve_results();
+                                $timeout(queryOnline, 1100);
+                            }
+                        })
                     }
                 }
                 const MAX_REQUESTS_PER_SECOND = 2;
