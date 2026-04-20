@@ -342,12 +342,13 @@
                         })
                         .finally(() => {
                             resolve_results();
-                            $timeout(queryOnline, 1000);
+                            $timeout(queryOnline, 1100);
                         });
                     }
                 }
-                for (let i = 0; i < Math.min(10, $scope.queue.length); ++i) {
-                    $timeout(queryOnline, i * 100);
+                const MAX_REQUESTS_PER_SECOND = 2;
+                for (let i = 0; i < Math.min(MAX_REQUESTS_PER_SECOND, $scope.queue.length); ++i) {
+                    $timeout(queryOnline, i * (1000 / MAX_REQUESTS_PER_SECOND));
                 }
             }
         }]);
